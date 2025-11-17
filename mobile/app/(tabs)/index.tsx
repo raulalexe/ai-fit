@@ -41,6 +41,7 @@ export default function HomeScreen() {
   const handleSave = async () => {
     if (!workout) return;
     try {
+      setError(null);
       await saveWorkoutMutation.mutateAsync(workout);
       setStatusMessage('Workout saved to your library.');
     } catch (err) {
