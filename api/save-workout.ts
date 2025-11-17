@@ -1,6 +1,7 @@
 import { kv } from '@vercel/kv';
 import { z } from 'zod';
 
+import { getUserProfile, updateUserSettings } from '../lib/user-profile';
 import { generateWorkoutRequestSchema, workoutPlanSchema } from '../lib/workout-schema';
 
 const savePayloadSchema = z.object({
@@ -40,7 +41,17 @@ export default async function handler(request: Request): Promise<Response> {
       });
     }
 
+    const profile = await getUserProfile(parsed.data.userId);
+
+    if (profile.tier !== 'premium') {
+      return new Response(JSON.stringify({ error: 'Saving workout history requires premium access.' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
     const record = await storeWorkout(parsed.data);
+    await updateUserSettings(parsed.data.request);
 
     return new Response(JSON.stringify(record), {
       status: 201,
@@ -56,8 +67,6 @@ export default async function handler(request: Request): Promise<Response> {
 }
 
 async function storeWorkout(payload: SavePayload): Promise<StoredWorkoutRecord> {
-  await ensureUserRecord(payload.userId, payload.request);
-
   const record: StoredWorkoutRecord = {
     id: crypto.randomUUID(),
     user_id: payload.userId,
@@ -72,27 +81,6 @@ async function storeWorkout(payload: SavePayload): Promise<StoredWorkoutRecord> 
   await kv.ltrim(key, 0, 49);
 
   return record;
-}
-
-async function ensureUserRecord(userId: string, settings: z.infer<typeof generateWorkoutRequestSchema>) {
-  const userKey = getUserKey(userId);
-  const created = await kv.hget<string>(userKey, 'created_at');
-
-  if (!created) {
-    await kv.hset(userKey, {
-      id: userId,
-      created_at: new Date().toISOString(),
-    });
-  }
-
-  await kv.hset(userKey, {
-    settings: JSON.stringify(settings),
-    updated_at: new Date().toISOString(),
-  });
-}
-
-function getUserKey(userId: string) {
-  return `users:${userId}`;
 }
 
 function getWorkoutsKey(userId: string) {

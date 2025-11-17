@@ -9,7 +9,7 @@ export const generateWorkoutRequestSchema = z.object({
   intensity: z.enum(intensityLevels),
   goal: z.enum(goalOptions),
   equipment: z.enum(equipmentOptions),
-  userId: z.string().min(8).optional(),
+  userId: z.string().min(8),
 });
 
 export const workoutExerciseSchema = z.object({

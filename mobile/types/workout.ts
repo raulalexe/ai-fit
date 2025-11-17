@@ -42,8 +42,12 @@ export interface WorkoutPlan {
   blocks: WorkoutBlock[];
 }
 
+export interface GenerateWorkoutRequest extends WorkoutSelection {
+  userId: string;
+}
+
 export interface WorkoutResponse {
-  request: WorkoutSelection;
+  request: GenerateWorkoutRequest;
   plan: WorkoutPlan;
 }
 

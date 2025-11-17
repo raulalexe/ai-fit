@@ -42,6 +42,7 @@ A full-stack AI-powered workout planner that pairs an Expo/React Native front-en
 | `ANTHROPIC_MODEL` | Defaults to `claude-3-5-sonnet-latest` |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN`, `KV_URL` | Provided by Vercel KV |
 | `EXPO_PUBLIC_API_BASE_URL` | Optional override for mobile to point at deployed API |
+| `PREMIUM_MONTHLY_PRICE` | Display price (defaults to `5.99`) shown in the app |
 
 Create a `.env` locally (and configure Vercel project env variables) with the keys above.
 
@@ -70,11 +71,13 @@ All endpoints run on the Vercel Edge runtime and live under `/api`.
 | `POST /api/generate-workout` | Validates user inputs, builds the master prompt, calls the AI provider, enforces JSON schema, and returns `{ request, plan }`. |
 | `GET /api/workouts?userId=...` | Fetches the 50 most recent workouts for a user from Vercel KV. |
 | `POST /api/save-workout` | Persists a workout record (`inputs` and `output`) with timestamps and ensures a user row exists. |
+| `GET /api/user?userId=...` | Returns membership tier, pricing, and feature limits for the device/user id. |
+| `POST /api/upgrade` | Upgrades a user to premium (stubbed for now; integrate payments later). |
 
 ### Request/Response Shapes
 
 - `POST /api/generate-workout`
-  - **Body:** `{ time, intensity, goal, equipment, userId? }`
+  - **Body:** `{ time, intensity, goal, equipment, userId }`
   - **Response:** `{ request, plan }`
 - `POST /api/save-workout`
   - **Body:** `{ userId, request, plan }`
@@ -103,6 +106,7 @@ Although Vercel KV is a Redis store, it mirrors table semantics via key naming:
   - Per-block countdown timers
   - Warm-up, finisher, and cooldown lists
 - Saved tab syncs with the backend to show previously saved workouts with quick previews.
+- Built-in monetization: the app fetches membership status from `/api/user` and enforces free-tier limits (1 workout/day, restricted goals/equipment, no history). Upgrading via `/api/upgrade` flips the tier to premium, unlocking unlimited generations, multiple daily sessions, advanced goals/equipment, and workout history.
 
 ## Deployment
 

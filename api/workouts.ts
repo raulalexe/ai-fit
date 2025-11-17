@@ -1,6 +1,7 @@
 import { kv } from '@vercel/kv';
 import { z } from 'zod';
 
+import { getUserProfile } from '../lib/user-profile';
 import { generateWorkoutRequestSchema, workoutPlanSchema } from '../lib/workout-schema';
 
 const querySchema = z.object({
@@ -35,6 +36,15 @@ export default async function handler(request: Request): Promise<Response> {
   if (!parsed.success) {
     return new Response(JSON.stringify({ error: 'userId is required and must be valid' }), {
       status: 400,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
+
+  const profile = await getUserProfile(parsed.data.userId);
+
+  if (profile.tier !== 'premium') {
+    return new Response(JSON.stringify({ error: 'Workout history is a premium feature.' }), {
+      status: 403,
       headers: { 'content-type': 'application/json' },
     });
   }

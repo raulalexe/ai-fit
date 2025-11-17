@@ -6,7 +6,12 @@ import type { StoredWorkout, WorkoutResponse, WorkoutSelection } from '@/types/w
 export function useGenerateWorkout(userId?: string | null) {
   return useMutation({
     mutationKey: ['generate-workout', userId],
-    mutationFn: (selection: WorkoutSelection) => generateWorkout({ ...selection, userId }),
+    mutationFn: (selection: WorkoutSelection) => {
+      if (!userId) {
+        throw new Error('Missing user id');
+      }
+      return generateWorkout({ ...selection, userId });
+    },
   });
 }
 
@@ -29,7 +34,7 @@ export function useSaveWorkout(userId?: string | null) {
   });
 }
 
-export function useSavedWorkouts(userId?: string | null) {
+export function useSavedWorkouts(userId?: string | null, enabled: boolean = true) {
   return useQuery<StoredWorkout[]>({
     queryKey: ['workouts', userId],
     queryFn: () => {
@@ -38,7 +43,7 @@ export function useSavedWorkouts(userId?: string | null) {
       }
       return fetchWorkouts(userId);
     },
-    enabled: Boolean(userId),
+    enabled: Boolean(userId) && enabled,
     initialData: [],
   });
 }

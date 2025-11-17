@@ -1,25 +1,50 @@
 import { useCallback } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { useMembership } from '@/hooks/use-membership';
 import { useUserId } from '@/hooks/use-user-id';
 import { useSavedWorkouts } from '@/hooks/use-workout-api';
 import type { StoredWorkout } from '@/types/workout';
 
 export default function SavedWorkoutsScreen() {
   const { userId, loading } = useUserId();
-  const { data, isFetching, refetch, error } = useSavedWorkouts(userId);
+  const { profile, loading: loadingMembership, upgrade } = useMembership(userId);
+  const tier = profile?.tier ?? 'free';
+  const premiumPrice = profile?.premiumPrice ?? '5.99';
+  const canViewHistory = tier === 'premium';
+  const { data, isFetching, refetch, error } = useSavedWorkouts(userId, canViewHistory);
 
   const handleRefresh = useCallback(() => {
     refetch();
   }, [refetch]);
 
-  if (loading) {
+  if (loading || loadingMembership) {
     return (
       <ThemedView style={styles.state}>
         <ActivityIndicator />
         <ThemedText>Loading your library...</ThemedText>
+      </ThemedView>
+    );
+  }
+
+  if (!canViewHistory) {
+    return (
+      <ThemedView style={styles.state}>
+        <ThemedText type="title">Upgrade for history</ThemedText>
+        <ThemedText color="secondary">Premium members can save unlimited workouts and revisit any session.</ThemedText>
+        <Pressable
+          accessibilityRole="button"
+          style={[styles.upgradeButton, (!userId || upgrade.isPending) && styles.buttonDisabled]}
+          onPress={() => upgrade.mutate()}
+          disabled={!userId || upgrade.isPending}>
+          {upgrade.isPending ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.upgradeButtonText}>Upgrade for ${premiumPrice}/mo</Text>
+          )}
+        </Pressable>
       </ThemedView>
     );
   }
@@ -143,5 +168,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     padding: 24,
+  },
+  upgradeButton: {
+    marginTop: 12,
+    backgroundColor: '#0a7ea4',
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+  },
+  upgradeButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  buttonDisabled: {
+    opacity: 0.4,
   },
 });
