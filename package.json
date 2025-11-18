@@ -1,0 +1,27 @@
+{
+  "name": "ai-mobile-stack",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npm run dev:mobile",
+    "dev:mobile": "npm --prefix mobile run start",
+    "build:mobile": "npm --prefix mobile run build",
+    "test": "npm --prefix mobile run test",
+    "test:backend": "vitest run",
+    "lint": "npm --prefix mobile run lint || true"
+  },
+  "workspaces": [
+    "mobile"
+  ],
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0",
+    "@vercel/kv": "^3.0.0",
+    "openai": "^6.9.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "vitest": "^4.0.10"
+  }
+}
