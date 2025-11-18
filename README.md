@@ -43,6 +43,9 @@ A full-stack AI-powered workout planner that pairs an Expo/React Native front-en
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN`, `KV_URL` | Provided by Vercel KV |
 | `EXPO_PUBLIC_API_BASE_URL` | Optional override for mobile to point at deployed API |
 | `PREMIUM_MONTHLY_PRICE` | Display price (defaults to `5.99`) shown in the app |
+| `PREMIUM_ANNUAL_PRICE` | Annual plan price shown in the app (defaults to `59.99`) |
+| `FREE_DAILY_WORKOUT_LIMIT` | Override free-tier quota (defaults to `1`) |
+| `STRIPE_SECRET_KEY` | Required for verifying Stripe Checkout receipts on `/api/upgrade` |
 
 Create a `.env` locally (and configure Vercel project env variables) with the keys above.
 
@@ -71,8 +74,8 @@ All endpoints run on the Vercel Edge runtime and live under `/api`.
 | `POST /api/generate-workout` | Validates user inputs, builds the master prompt, calls the AI provider, enforces JSON schema, and returns `{ request, plan }`. |
 | `GET /api/workouts?userId=...` | Fetches the 50 most recent workouts for a user from Vercel KV. |
 | `POST /api/save-workout` | Persists a workout record (`inputs` and `output`) with timestamps and ensures a user row exists. |
-| `GET /api/user?userId=...` | Returns membership tier, pricing, and feature limits for the device/user id. |
-| `POST /api/upgrade` | Upgrades a user to premium (stubbed for now; integrate payments later). |
+| `GET /api/user?userId=...` | Returns membership tier, remaining free workouts, pricing, and feature limits for the device/user id. |
+| `POST /api/upgrade` | Verifies a Stripe Checkout receipt and upgrades the user to premium (supports monthly or annual plans). |
 
 ### Request/Response Shapes
 
@@ -84,6 +87,11 @@ All endpoints run on the Vercel Edge runtime and live under `/api`.
   - **Response:** `{ id, user_id, created_at, inputs, output }`
 - `GET /api/workouts`
   - **Response:** `{ data: Array<{ id, user_id, created_at, inputs, output }> }`
+- `GET /api/user`
+  - **Response:** `{ id, tier, pricing: { monthly, annual, supportedPlans }, remainingFreeWorkouts, limits, subscription }`
+- `POST /api/upgrade`
+  - **Body:** `{ userId, provider: 'stripe', plan: 'monthly' | 'annual', receipt: '<checkout-session-id>' }`
+  - **Behavior:** Verifies the Stripe Checkout session, saves the receipt, upgrades the user to premium, and returns the updated profile payload.
 
 ## Database Layout (Vercel KV)
 
@@ -97,6 +105,8 @@ Although Vercel KV is a Redis store, it mirrors table semantics via key naming:
 - **Workouts table** (`workouts:{userId}` list)
   - Each entry: `{ id, user_id, created_at, inputs, output }`
   - Lists are trimmed to the 50 most recent workouts per user
+- **Subscriptions table** (`subscriptions:{userId}` hash)
+  - `{ provider, plan, receiptId, amount, currency, purchasedAt, expiresAt }`
 
 ## Mobile UX Highlights
 
@@ -106,7 +116,7 @@ Although Vercel KV is a Redis store, it mirrors table semantics via key naming:
   - Per-block countdown timers
   - Warm-up, finisher, and cooldown lists
 - Saved tab syncs with the backend to show previously saved workouts with quick previews.
-- Built-in monetization: the app fetches membership status from `/api/user` and enforces free-tier limits (1 workout/day, restricted goals/equipment, no history). Upgrading via `/api/upgrade` flips the tier to premium, unlocking unlimited generations, multiple daily sessions, advanced goals/equipment, and workout history.
+- Built-in monetization: the app fetches membership status from `/api/user`, displays the remaining free-workout count, and enforces free-tier limits (1 workout/day, restricted goals/equipment, no history). Upgrading via `/api/upgrade` now requires a verified Stripe Checkout receipt and supports monthly ($`PREMIUM_MONTHLY_PRICE`) or annual ($`PREMIUM_ANNUAL_PRICE`) plans. Premium unlocks unlimited generations, multiple daily sessions, advanced goals/equipment, and workout history.
 
 ## Deployment
 
@@ -118,5 +128,6 @@ Although Vercel KV is a Redis store, it mirrors table semantics via key naming:
 
 ## Testing & Linting
 
+- `npm run test:backend` (Vitest unit tests for the tier helper logic)
 - `npm run lint` (delegates to Expo’s lint config)
 - Additional mobile testing can be done with Expo’s preview builds or E2E frameworks (Detox, Maestro) as needed.

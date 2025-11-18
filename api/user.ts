@@ -27,5 +27,6 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   const profile = await getUserProfile(parsed.data.userId);
-  return Response.json(serializeProfileResponse(profile));
+  const payload = await serializeProfileResponse(profile);
+  return Response.json(payload);
 }

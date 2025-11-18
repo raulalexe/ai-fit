@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { fetchUserProfile, upgradeUser } from '@/lib/api';
+import type { UpgradePayload } from '@/lib/api';
 import type { UserProfile } from '@/types/user';
 
 export function useMembership(userId?: string | null) {
@@ -19,12 +20,7 @@ export function useMembership(userId?: string | null) {
 
   const upgradeMutation = useMutation({
     mutationKey: ['upgrade', userId],
-    mutationFn: () => {
-      if (!userId) {
-        throw new Error('Missing user id');
-      }
-      return upgradeUser(userId);
-    },
+    mutationFn: (payload: UpgradePayload) => upgradeUser(payload),
     onSuccess: () => {
       if (userId) {
         queryClient.invalidateQueries({ queryKey: ['user-profile', userId] });

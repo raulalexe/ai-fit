@@ -7,7 +7,7 @@ import type {
   WorkoutResponse,
   WorkoutSelection,
 } from '@/types/workout';
-import type { UserProfile } from '@/types/user';
+import type { PlanInterval, UserProfile } from '@/types/user';
 
 const API_BASE_URL =
   Constants?.expoConfig?.extra?.apiBaseUrl ??
@@ -68,11 +68,18 @@ export async function fetchUserProfile(userId: string) {
   return handleResponse<UserProfile>(response);
 }
 
-export async function upgradeUser(userId: string) {
+export interface UpgradePayload {
+  userId: string;
+  provider: 'stripe';
+  plan: PlanInterval;
+  receipt: string;
+}
+
+export async function upgradeUser(payload: UpgradePayload) {
   const response = await fetch(`${API_BASE_URL}/api/upgrade`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ userId }),
+    body: JSON.stringify(payload),
   });
   return handleResponse<UserProfile>(response);
 }

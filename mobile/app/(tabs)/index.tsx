@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -8,6 +8,7 @@ import { useMembership } from '@/hooks/use-membership';
 import { useUserId } from '@/hooks/use-user-id';
 import { useGenerateWorkout, useSaveWorkout } from '@/hooks/use-workout-api';
 import type { WorkoutBlock, WorkoutResponse, WorkoutSelection } from '@/types/workout';
+import type { PlanInterval } from '@/types/user';
 
 const defaultSelection: WorkoutSelection = {
   time: 45,
@@ -30,9 +31,12 @@ export default function HomeScreen() {
   const [workout, setWorkout] = useState<WorkoutResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<PlanInterval>('monthly');
+  const [receiptInput, setReceiptInput] = useState('');
 
   const tier = membership?.tier ?? 'free';
-  const premiumPrice = membership?.premiumPrice ?? '5.99';
+  const premiumMonthly = membership?.pricing.monthly ?? '5.99';
+  const premiumAnnual = membership?.pricing.annual ?? '59.99';
   const allowedGoals =
     membership?.limits.allowedGoals ?? (tier === 'free' ? freeGoalValues : allGoalValues);
   const allowedEquipment =
@@ -67,9 +71,19 @@ export default function HomeScreen() {
 
   const handleUpgrade = async () => {
     if (!userId) return;
+    if (!receiptInput.trim()) {
+      setError('Enter your Stripe Checkout Session ID to upgrade.');
+      return;
+    }
     setError(null);
     try {
-      await upgrade.mutateAsync();
+      await upgrade.mutateAsync({
+        userId,
+        provider: 'stripe',
+        plan: selectedPlan,
+        receipt: receiptInput.trim(),
+      });
+      setReceiptInput('');
       setStatusMessage('Welcome to Premium — unlimited workouts unlocked.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upgrade failed. Try again.');
@@ -100,7 +114,7 @@ export default function HomeScreen() {
     };
   });
 
-  const upgradeDisabled = upgrade.isPending || !userId;
+  const upgradeDisabled = upgrade.isPending || !userId || receiptInput.trim().length < 4;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -117,15 +131,49 @@ export default function HomeScreen() {
             <Text style={styles.noticeItem}>• 1 workout per day</Text>
             <Text style={styles.noticeItem}>• Goals: Strength & Endurance</Text>
             <Text style={styles.noticeItem}>• Equipment: Bodyweight / Minimal</Text>
+            {typeof membership?.remainingFreeWorkouts === 'number' && (
+              <Text style={styles.noticeItem}>
+                • Workouts left today: {membership.remainingFreeWorkouts}
+              </Text>
+            )}
+            <View style={styles.planToggle}>
+              {(['monthly', 'annual'] as PlanInterval[]).map((plan) => {
+                const price = plan === 'monthly' ? premiumMonthly : premiumAnnual;
+                const active = selectedPlan === plan;
+                return (
+                  <Pressable
+                    key={plan}
+                    accessibilityRole="button"
+                    style={[styles.planButton, active && styles.planButtonActive]}
+                    onPress={() => setSelectedPlan(plan)}>
+                    <Text style={[styles.planButtonLabel, active && styles.planButtonLabelActive]}>
+                      {plan === 'monthly' ? `Monthly · $${price}` : `Annual · $${price}`}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <TextInput
+              placeholder="Enter Stripe Checkout Session ID"
+              placeholderTextColor="#777"
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={receiptInput}
+              onChangeText={setReceiptInput}
+              style={styles.receiptInput}
+            />
             <Pressable
               accessibilityRole="button"
               style={[styles.upgradeButton, upgradeDisabled && styles.buttonDisabled]}
               onPress={handleUpgrade}
               disabled={upgradeDisabled}>
               <Text style={styles.upgradeButtonText}>
-                Upgrade for ${premiumPrice}/mo
+                Upgrade for {selectedPlan === 'monthly' ? `$${premiumMonthly}/mo` : `$${premiumAnnual}/yr`}
               </Text>
             </Pressable>
+            <Text style={styles.paywallText}>
+              Paste the receipt ID you receive from Stripe Checkout. Purchases are verified instantly.
+            </Text>
           </View>
         )}
 
@@ -217,7 +265,7 @@ export default function HomeScreen() {
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <Text style={styles.upgradeButtonText}>
-                    Upgrade for ${premiumPrice}/mo
+                      Upgrade for {selectedPlan === 'monthly' ? `$${premiumMonthly}/mo` : `$${premiumAnnual}/yr`}
                   </Text>
                 )}
               </Pressable>
@@ -556,6 +604,40 @@ const styles = StyleSheet.create({
   },
   noticeItem: {
     color: '#555',
+  },
+  planToggle: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 4,
+  },
+  planButton: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#c7d7e5',
+    alignItems: 'center',
+  },
+  planButtonActive: {
+    backgroundColor: '#0a7ea4',
+    borderColor: '#0a7ea4',
+  },
+  planButtonLabel: {
+    color: '#0a7ea4',
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  planButtonLabelActive: {
+    color: '#fff',
+  },
+  receiptInput: {
+    borderWidth: 1,
+    borderColor: '#d0d0d0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#111',
   },
   upgradeButton: {
     backgroundColor: '#0a7ea4',
