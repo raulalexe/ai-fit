@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -31,9 +30,6 @@ const FEATURES = [
   'Voice coaching (later)',
   'Personalized programs (later)',
 ] as const;
-
-const TERMS_URL = 'https://example.com/terms';
-const PRIVACY_URL = 'https://example.com/privacy';
 
 export default function PaywallScreen() {
   const router = useRouter();
@@ -182,8 +178,8 @@ export default function PaywallScreen() {
     router.back();
   };
 
-  const handleLink = (url: string) => {
-    Linking.openURL(url).catch(() => showToast('Unable to open link'));
+  const handleLink = (route: 'terms' | 'privacy') => {
+    router.push(`/${route}`);
   };
 
   const currentPlanPrice = selectedPlan === 'monthly' ? plans.monthly.price : plans.annual.price;
@@ -253,11 +249,11 @@ export default function PaywallScreen() {
         </Pressable>
 
         <View style={styles.footer}>
-          <Text style={styles.footerLink} onPress={() => handleLink(TERMS_URL)}>
+          <Text style={styles.footerLink} onPress={() => handleLink('terms')}>
             Terms of Use
           </Text>
           <Text style={styles.footerDivider}>•</Text>
-          <Text style={styles.footerLink} onPress={() => handleLink(PRIVACY_URL)}>
+          <Text style={styles.footerLink} onPress={() => handleLink('privacy')}>
             Privacy Policy
           </Text>
         </View>
