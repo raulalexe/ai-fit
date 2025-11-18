@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { equipmentOptions, goalOptions, intensityOptions, timeOptions } from '@/constants/workout';
-import { useMembership } from '@/hooks/use-membership';
 import { useUserId } from '@/hooks/use-user-id';
 import { useGenerateWorkout, useSaveWorkout } from '@/hooks/use-workout-api';
 import type { WorkoutBlock, WorkoutResponse, WorkoutSelection } from '@/types/workout';
-import type { PlanInterval } from '@/types/user';
+import { usePremium } from '@/src/hooks/usePremium';
 
 const defaultSelection: WorkoutSelection = {
   time: 45,
@@ -21,72 +20,76 @@ const freeGoalValues: WorkoutSelection['goal'][] = ['strength', 'endurance'];
 const freeEquipmentValues: WorkoutSelection['equipment'][] = ['bodyweight', 'minimal'];
 const allGoalValues = goalOptions.map((option) => option.value);
 const allEquipmentValues = equipmentOptions.map((option) => option.value);
+const MONTHLY_PRICE_LABEL = '$7.99/mo';
+const ANNUAL_PRICE_LABEL = '$59/yr';
 
 export default function HomeScreen() {
   const { userId, loading: loadingUser } = useUserId();
-  const { profile: membership, loading: loadingMembership, upgrade } = useMembership(userId);
+  const {
+    premium,
+    loading: premiumLoading,
+    remainingFreeWorkouts,
+    openPaywall,
+    requirePremium,
+    decrementFreeWorkout,
+  } = usePremium();
   const generateWorkoutMutation = useGenerateWorkout(userId);
   const saveWorkoutMutation = useSaveWorkout(userId);
   const [selection, setSelection] = useState<WorkoutSelection>(defaultSelection);
   const [workout, setWorkout] = useState<WorkoutResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [selectedPlan, setSelectedPlan] = useState<PlanInterval>('monthly');
-  const [receiptInput, setReceiptInput] = useState('');
+  const streakCountRef = useRef(0);
+  const streakPaywallShown = useRef(false);
 
-  const tier = membership?.tier ?? 'free';
-  const premiumMonthly = membership?.pricing.monthly ?? '5.99';
-  const premiumAnnual = membership?.pricing.annual ?? '59.99';
-  const allowedGoals =
-    membership?.limits.allowedGoals ?? (tier === 'free' ? freeGoalValues : allGoalValues);
-  const allowedEquipment =
-    membership?.limits.allowedEquipment ??
-    (tier === 'free' ? freeEquipmentValues : allEquipmentValues);
-  const canSaveHistory = tier === 'premium';
+  const allowedGoals = premium ? allGoalValues : freeGoalValues;
+  const allowedEquipment = premium ? allEquipmentValues : freeEquipmentValues;
+  const canSaveHistory = premium;
   const disableActions =
-    loadingUser || loadingMembership || !userId || generateWorkoutMutation.isPending;
+    loadingUser || premiumLoading || !userId || generateWorkoutMutation.isPending;
 
   const handleGenerate = async () => {
     setError(null);
     setStatusMessage(null);
     try {
+      if (!premium && remainingFreeWorkouts <= 0) {
+        openPaywall('daily_limit', userId ?? undefined);
+        return;
+      }
       const plan = await generateWorkoutMutation.mutateAsync(selection);
       setWorkout(plan);
       setStatusMessage('Plan ready – scroll down to review.');
+      if (!premium) {
+        decrementFreeWorkout();
+        streakCountRef.current += 1;
+        if (!streakPaywallShown.current && streakCountRef.current >= 3) {
+          openPaywall('streak', userId ?? undefined);
+          streakPaywallShown.current = true;
+        }
+      } else {
+        streakCountRef.current = 0;
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate workout');
+      const message = err instanceof Error ? err.message : 'Failed to generate workout';
+      setError(message);
+      if (!premium && message.toLowerCase().includes('limit')) {
+        openPaywall('daily_limit_error', userId ?? undefined);
+      }
     }
   };
 
   const handleSave = async () => {
-    if (!workout || !canSaveHistory) return;
+    if (!workout) return;
+    if (!canSaveHistory) {
+      requirePremium('save_history', userId ?? undefined);
+      return;
+    }
     try {
       setError(null);
       await saveWorkoutMutation.mutateAsync(workout);
       setStatusMessage('Workout saved to your library.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to save workout');
-    }
-  };
-
-  const handleUpgrade = async () => {
-    if (!userId) return;
-    if (!receiptInput.trim()) {
-      setError('Enter your Stripe Checkout Session ID to upgrade.');
-      return;
-    }
-    setError(null);
-    try {
-      await upgrade.mutateAsync({
-        userId,
-        provider: 'stripe',
-        plan: selectedPlan,
-        receipt: receiptInput.trim(),
-      });
-      setReceiptInput('');
-      setStatusMessage('Welcome to Premium — unlimited workouts unlocked.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upgrade failed. Try again.');
     }
   };
 
@@ -97,7 +100,7 @@ export default function HomeScreen() {
   }, [loadingUser, generateWorkoutMutation.isPending]);
 
   const goalOptionData = goalOptions.map((option) => {
-    const disabled = tier === 'free' && !allowedGoals.includes(option.value);
+    const disabled = !premium && !allowedGoals.includes(option.value);
     return {
       ...option,
       disabled,
@@ -106,7 +109,7 @@ export default function HomeScreen() {
   });
 
   const equipmentOptionData = equipmentOptions.map((option) => {
-    const disabled = tier === 'free' && !allowedEquipment.includes(option.value);
+    const disabled = !premium && !allowedEquipment.includes(option.value);
     return {
       ...option,
       disabled,
@@ -114,7 +117,16 @@ export default function HomeScreen() {
     };
   });
 
-  const upgradeDisabled = upgrade.isPending || !userId || receiptInput.trim().length < 4;
+  const lockedFeatureButtons = useMemo(
+    () => [
+      { id: 'energy_level', title: 'Energy level input', subtitle: 'Dial in intensity with RPE sliders' },
+      { id: 'custom_plan', title: 'Custom training plans', subtitle: 'Build multi-week programs' },
+      { id: 'voice_mode', title: 'Voice coaching', subtitle: 'Hands-free cues coming soon' },
+    ],
+    []
+  );
+
+  const upgradeDisabled = premiumLoading || !userId;
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -125,54 +137,26 @@ export default function HomeScreen() {
           block-based plan with timers.
         </ThemedText>
 
-        {tier === 'free' && (
+        {!premium && (
           <View style={styles.noticeCard}>
             <ThemedText type="subtitle">Free plan limits</ThemedText>
             <Text style={styles.noticeItem}>• 1 workout per day</Text>
             <Text style={styles.noticeItem}>• Goals: Strength & Endurance</Text>
             <Text style={styles.noticeItem}>• Equipment: Bodyweight / Minimal</Text>
-            {typeof membership?.remainingFreeWorkouts === 'number' && (
+            {typeof remainingFreeWorkouts === 'number' && (
               <Text style={styles.noticeItem}>
-                • Workouts left today: {membership.remainingFreeWorkouts}
+                • Workouts left today: {remainingFreeWorkouts}
               </Text>
             )}
-            <View style={styles.planToggle}>
-              {(['monthly', 'annual'] as PlanInterval[]).map((plan) => {
-                const price = plan === 'monthly' ? premiumMonthly : premiumAnnual;
-                const active = selectedPlan === plan;
-                return (
-                  <Pressable
-                    key={plan}
-                    accessibilityRole="button"
-                    style={[styles.planButton, active && styles.planButtonActive]}
-                    onPress={() => setSelectedPlan(plan)}>
-                    <Text style={[styles.planButtonLabel, active && styles.planButtonLabelActive]}>
-                      {plan === 'monthly' ? `Monthly · $${price}` : `Annual · $${price}`}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <TextInput
-              placeholder="Enter Stripe Checkout Session ID"
-              placeholderTextColor="#777"
-              autoCapitalize="none"
-              autoCorrect={false}
-              value={receiptInput}
-              onChangeText={setReceiptInput}
-              style={styles.receiptInput}
-            />
             <Pressable
               accessibilityRole="button"
               style={[styles.upgradeButton, upgradeDisabled && styles.buttonDisabled]}
-              onPress={handleUpgrade}
+              onPress={() => openPaywall('banner', userId ?? undefined)}
               disabled={upgradeDisabled}>
-              <Text style={styles.upgradeButtonText}>
-                Upgrade for {selectedPlan === 'monthly' ? `$${premiumMonthly}/mo` : `$${premiumAnnual}/yr`}
-              </Text>
+              <Text style={styles.upgradeButtonText}>Start Premium · {MONTHLY_PRICE_LABEL}</Text>
             </Pressable>
             <Text style={styles.paywallText}>
-              Paste the receipt ID you receive from Stripe Checkout. Purchases are verified instantly.
+              Annual plan {ANNUAL_PRICE_LABEL} — Best Value · Save 38%
             </Text>
           </View>
         )}
@@ -200,8 +184,9 @@ export default function HomeScreen() {
           options={goalOptionData}
           value={selection.goal}
           onChange={(goal) => setSelection((prev) => ({ ...prev, goal }))}
+          onLockedPress={(option) => requirePremium(`goal:${option.value}`, userId ?? undefined)}
         />
-        {tier === 'free' && (
+        {!premium && (
           <Text style={styles.paywallText}>
             Premium unlocks Hypertrophy, Mobility, and Fat Loss programming.
           </Text>
@@ -212,11 +197,31 @@ export default function HomeScreen() {
           options={equipmentOptionData}
           value={selection.equipment}
           onChange={(equipment) => setSelection((prev) => ({ ...prev, equipment }))}
+          onLockedPress={(option) => requirePremium(`equipment:${option.value}`, userId ?? undefined)}
         />
-        {tier === 'free' && (
+        {!premium && (
           <Text style={styles.paywallText}>
             Upgrade to access full gym and advanced equipment templates.
           </Text>
+        )}
+
+        {!premium && (
+          <View style={styles.lockedFeatures}>
+            <ThemedText type="subtitle">Premium tools</ThemedText>
+            {lockedFeatureButtons.map((feature) => (
+              <Pressable
+                key={feature.id}
+                accessibilityRole="button"
+                style={styles.lockedFeatureButton}
+                onPress={() => requirePremium(feature.id, userId ?? undefined)}>
+                <View style={styles.lockedFeatureCopy}>
+                  <Text style={styles.lockedFeatureTitle}>{feature.title}</Text>
+                  <Text style={styles.lockedFeatureSubtitle}>{feature.subtitle}</Text>
+                </View>
+                <Text style={styles.lockIcon}>🔒</Text>
+              </Pressable>
+            ))}
+          </View>
         )}
 
         <Pressable
@@ -250,27 +255,21 @@ export default function HomeScreen() {
                 <Text style={styles.secondaryButtonText}>Save workout</Text>
               )}
             </Pressable>
-          ) : (
-            <View style={styles.noticeCard}>
-              <ThemedText type="subtitle">Save history with Premium</ThemedText>
-              <Text style={styles.noticeItem}>
-                Keep unlimited workouts synced across devices.
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                style={[styles.upgradeButton, upgradeDisabled && styles.buttonDisabled]}
-                onPress={handleUpgrade}
-                disabled={upgradeDisabled}>
-                {upgrade.isPending ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.upgradeButtonText}>
-                      Upgrade for {selectedPlan === 'monthly' ? `$${premiumMonthly}/mo` : `$${premiumAnnual}/yr`}
-                  </Text>
-                )}
-              </Pressable>
-            </View>
-          ))}
+            ) : (
+              <View style={styles.noticeCard}>
+                <ThemedText type="subtitle">Save history with Premium</ThemedText>
+                <Text style={styles.noticeItem}>
+                  Keep unlimited workouts synced across devices.
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  style={[styles.upgradeButton, upgradeDisabled && styles.buttonDisabled]}
+                  onPress={() => openPaywall('save_history', userId ?? undefined)}
+                  disabled={upgradeDisabled}>
+                  <Text style={styles.upgradeButtonText}>Start Premium · {MONTHLY_PRICE_LABEL}</Text>
+                </Pressable>
+              </View>
+            ))}
       </ThemedView>
 
       {workout && <WorkoutPlanView workout={workout} />}
@@ -291,9 +290,16 @@ type OptionGroupProps<T> = {
   options: Option<T>[];
   value: T;
   onChange: (value: T) => void;
+  onLockedPress?: (option: Option<T>) => void;
 };
 
-function OptionGroup<T extends string | number>({ title, options, value, onChange }: OptionGroupProps<T>) {
+function OptionGroup<T extends string | number>({
+  title,
+  options,
+  value,
+  onChange,
+  onLockedPress,
+}: OptionGroupProps<T>) {
   return (
     <View style={styles.optionGroup}>
       <ThemedText type="subtitle">{title}</ThemedText>
@@ -305,7 +311,10 @@ function OptionGroup<T extends string | number>({ title, options, value, onChang
             <Pressable
               key={option.value}
               onPress={() => {
-                if (disabled) return;
+                if (disabled) {
+                  onLockedPress?.(option);
+                  return;
+                }
                 onChange(option.value);
               }}
               disabled={disabled}
@@ -321,9 +330,10 @@ function OptionGroup<T extends string | number>({ title, options, value, onChang
                     selected && styles.optionLabelSelected,
                     disabled && styles.optionLabelDisabled,
                   ]}>
-                {option.label}
+                  {option.label}
                 </Text>
                 {option.badge ? <Text style={styles.optionBadge}>{option.badge}</Text> : null}
+                {disabled ? <Text style={styles.lockIcon}>🔒</Text> : null}
               </View>
               {option.description && (
                 <Text
@@ -605,39 +615,36 @@ const styles = StyleSheet.create({
   noticeItem: {
     color: '#555',
   },
-  planToggle: {
-    flexDirection: 'row',
+  lockedFeatures: {
     gap: 8,
-    marginTop: 4,
+    marginBottom: 12,
   },
-  planButton: {
-    flex: 1,
-    paddingVertical: 8,
-    borderRadius: 10,
+  lockedFeatureButton: {
     borderWidth: 1,
-    borderColor: '#c7d7e5',
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 12,
+    backgroundColor: '#f8fafc',
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  planButtonActive: {
-    backgroundColor: '#0a7ea4',
-    borderColor: '#0a7ea4',
+  lockedFeatureCopy: {
+    flex: 1,
+    gap: 2,
   },
-  planButtonLabel: {
-    color: '#0a7ea4',
+  lockedFeatureTitle: {
     fontWeight: '600',
-    fontSize: 13,
+    color: '#0f172a',
   },
-  planButtonLabelActive: {
-    color: '#fff',
+  lockedFeatureSubtitle: {
+    color: '#475569',
+    fontSize: 12,
   },
-  receiptInput: {
-    borderWidth: 1,
-    borderColor: '#d0d0d0',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: '#111',
+  lockIcon: {
+    color: '#cbd5f5',
+    fontSize: 16,
+    marginLeft: 8,
   },
   upgradeButton: {
     backgroundColor: '#0a7ea4',

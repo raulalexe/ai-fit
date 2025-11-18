@@ -45,7 +45,11 @@ A full-stack AI-powered workout planner that pairs an Expo/React Native front-en
 | `PREMIUM_MONTHLY_PRICE` | Display price (defaults to `5.99`) shown in the app |
 | `PREMIUM_ANNUAL_PRICE` | Annual plan price shown in the app (defaults to `59.99`) |
 | `FREE_DAILY_WORKOUT_LIMIT` | Override free-tier quota (defaults to `1`) |
-| `STRIPE_SECRET_KEY` | Required for verifying Stripe Checkout receipts on `/api/upgrade` |
+| `STRIPE_SECRET_KEY` | Optional: legacy Stripe verification key (only needed if you keep `/api/upgrade`) |
+| `REVENUECAT_API_KEY` | Secret RevenueCat REST API key used by `/api/verify-subscription` |
+| `VERIFY_SUBSCRIPTION_API_KEY` | Shared secret that clients must send in the `x-api-key` header when calling `/api/verify-subscription` |
+| `EXPO_PUBLIC_REVENUECAT_KEY` | RevenueCat public SDK key used by the Expo app (`react-native-purchases`) |
+| `EXPO_PUBLIC_VERIFY_SUBSCRIPTION_KEY` | Public key forwarded to `/api/verify-subscription` (matches `VERIFY_SUBSCRIPTION_API_KEY`) |
 
 Create a `.env` locally (and configure Vercel project env variables) with the keys above.
 
@@ -75,7 +79,8 @@ All endpoints run on the Vercel Edge runtime and live under `/api`.
 | `GET /api/workouts?userId=...` | Fetches the 50 most recent workouts for a user from Vercel KV. |
 | `POST /api/save-workout` | Persists a workout record (`inputs` and `output`) with timestamps and ensures a user row exists. |
 | `GET /api/user?userId=...` | Returns membership tier, remaining free workouts, pricing, and feature limits for the device/user id. |
-| `POST /api/upgrade` | Verifies a Stripe Checkout receipt and upgrades the user to premium (supports monthly or annual plans). |
+| `POST /api/upgrade` | (Legacy) Verifies a Stripe Checkout receipt and upgrades the user to premium. Keep only if you still sell via Stripe. |
+| `POST /api/verify-subscription` | Calls RevenueCat, caches the result for 10 minutes, and returns `{ premium, entitlementExpiration, remainingFreeWorkouts }`. Requires an `x-api-key` header. |
 
 ### Request/Response Shapes
 
@@ -92,6 +97,10 @@ All endpoints run on the Vercel Edge runtime and live under `/api`.
 - `POST /api/upgrade`
   - **Body:** `{ userId, provider: 'stripe', plan: 'monthly' | 'annual', receipt: '<checkout-session-id>' }`
   - **Behavior:** Verifies the Stripe Checkout session, saves the receipt, upgrades the user to premium, and returns the updated profile payload.
+- `POST /api/verify-subscription`
+  - **Headers:** `x-api-key: <VERIFY_SUBSCRIPTION_API_KEY>`
+  - **Body:** `{ userId }`
+  - **Response:** `{ premium: boolean, entitlementExpiration: string | null, remainingFreeWorkouts: number | null }`
 
 ## Database Layout (Vercel KV)
 
@@ -107,6 +116,8 @@ Although Vercel KV is a Redis store, it mirrors table semantics via key naming:
   - Lists are trimmed to the 50 most recent workouts per user
 - **Subscriptions table** (`subscriptions:{userId}` hash)
   - `{ provider, plan, receiptId, amount, currency, purchasedAt, expiresAt }`
+- **Usage counters** (`usage:{userId}:YYYY-MM-DD` keys)
+  - Increment-only values that expire nightly; used to calculate remaining free workouts
 
 ## Mobile UX Highlights
 
@@ -116,7 +127,34 @@ Although Vercel KV is a Redis store, it mirrors table semantics via key naming:
   - Per-block countdown timers
   - Warm-up, finisher, and cooldown lists
 - Saved tab syncs with the backend to show previously saved workouts with quick previews.
-- Built-in monetization: the app fetches membership status from `/api/user`, displays the remaining free-workout count, and enforces free-tier limits (1 workout/day, restricted goals/equipment, no history). Upgrading via `/api/upgrade` now requires a verified Stripe Checkout receipt and supports monthly ($`PREMIUM_MONTHLY_PRICE`) or annual ($`PREMIUM_ANNUAL_PRICE`) plans. Premium unlocks unlimited generations, multiple daily sessions, advanced goals/equipment, and workout history.
+- Built-in monetization: a dedicated paywall modal (`app/paywall.tsx` → `src/screens/PaywallScreen.tsx`) highlights the monthly `$7.99` and annual `$59` plans, the required copy (“Unlock Premium Training”, “Train smarter with unlimited AI-powered workouts.”), and the full benefits list. It is backed by RevenueCat (`react-native-purchases`) on-device plus `/api/verify-subscription` on the server. A global Zustand store tracks `premium`, remaining free workouts, emits analytics events (`paywall_viewed`, `paywall_purchase_*`, `feature_locked_clicked`, etc.), and enforces locks on free-tier users (daily limit, advanced goals/equipment, history, voice coaching, custom plans, 3-day streak rewards, etc.).
+
+## Paywall / Premium Architecture
+
+```
+mobile/
+  src/
+    api/verifySubscription.ts        # Calls the Edge verifier with the required x-api-key header
+    components/
+      PlanCard.tsx
+      PremiumFeatureList.tsx
+    hooks/usePremium.ts              # Router-aware helper around the Zustand store
+    screens/PaywallScreen.tsx        # Full-screen modal, RevenueCat offerings, CTA, restore purchases
+    stores/premiumStore.ts           # Global premium + remaining-free-workouts state
+    utils/analytics.ts               # Centralized tracking helper
+```
+
+- `react-native-purchases` is configured once in `app/_layout.tsx` via `Purchases.configure({ apiKey: EXPO_PUBLIC_REVENUECAT_KEY, appUserID })`.
+- `usePremium` exposes `premium`, `remainingFreeWorkouts`, `refreshPremiumStatus`, and helper methods (`openPaywall`, `requirePremium`, `decrementFreeWorkout`). All premium gating flows (daily quotas, locked goals/equipment, advanced settings, history saves, etc.) call these helpers.
+- Analytics events (`paywall_viewed`, `paywall_plan_selected`, `paywall_purchase_clicked/succeeded/failed`, `feature_locked_clicked`) are logged through `src/utils/analytics`.
+- `POST /api/verify-subscription` fetches the latest entitlements from RevenueCat, caches the response for 10 minutes, and returns both `premium` and `remainingFreeWorkouts`. Clients must supply the `x-api-key` header.
+
+### RevenueCat setup recap
+
+1. Add products `premium_monthly` and `premium_annual` to a single offering in RevenueCat, granting the `premium` entitlement.
+2. Set server env vars `REVENUECAT_API_KEY` and `VERIFY_SUBSCRIPTION_API_KEY`.
+3. Expose the matching public keys `EXPO_PUBLIC_REVENUECAT_KEY` and `EXPO_PUBLIC_VERIFY_SUBSCRIPTION_KEY` to the Expo app.
+4. The paywall screen automatically fetches offerings (`Purchases.getOfferings()`), lets users choose a plan, and runs `Purchases.purchasePackage`. Restoring purchases calls `Purchases.restorePurchases`.
 
 ## Deployment
 

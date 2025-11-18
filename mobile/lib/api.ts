@@ -7,9 +7,8 @@ import type {
   WorkoutResponse,
   WorkoutSelection,
 } from '@/types/workout';
-import type { PlanInterval, UserProfile } from '@/types/user';
 
-const API_BASE_URL =
+export const API_BASE_URL =
   Constants?.expoConfig?.extra?.apiBaseUrl ??
   process.env.EXPO_PUBLIC_API_BASE_URL ??
   'http://localhost:3000';
@@ -61,27 +60,6 @@ export async function fetchWorkouts(userId: string) {
   const response = await fetch(`${API_BASE_URL}/api/workouts?userId=${encodeURIComponent(userId)}`);
   const payload = await handleResponse<{ data: ApiStoredWorkout[] }>(response);
   return payload.data.map(normalizeWorkout);
-}
-
-export async function fetchUserProfile(userId: string) {
-  const response = await fetch(`${API_BASE_URL}/api/user?userId=${encodeURIComponent(userId)}`);
-  return handleResponse<UserProfile>(response);
-}
-
-export interface UpgradePayload {
-  userId: string;
-  provider: 'stripe';
-  plan: PlanInterval;
-  receipt: string;
-}
-
-export async function upgradeUser(payload: UpgradePayload) {
-  const response = await fetch(`${API_BASE_URL}/api/upgrade`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  return handleResponse<UserProfile>(response);
 }
 
 function normalizeWorkout(input: ApiStoredWorkout): StoredWorkout {

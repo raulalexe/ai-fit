@@ -3,7 +3,6 @@ import { kv } from '@vercel/kv';
 import { env } from './env';
 import { planIntervals, type PlanInterval } from './plans';
 import { FREE_ALLOWED_EQUIPMENT, FREE_ALLOWED_GOALS } from './tier-constants';
-import type { BillingProvider } from './billing';
 import {
   equipmentOptions,
   goalOptions,
@@ -26,6 +25,8 @@ export interface UserProfile {
   createdAt: string;
   settings?: Omit<GenerateWorkoutPayload, 'userId'>;
 }
+
+type BillingProvider = 'revenuecat';
 
 export interface SubscriptionRecord {
   provider: BillingProvider;
